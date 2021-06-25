@@ -11,7 +11,7 @@ app = Ursina()
 # colliders = [[[Entity(collider='box', add_to_scene_entities=False) for z in range(size)]for y in range(size)] for x in range(size)]
 class Voxel(Entity):
     def __init__(self, **kwargs):
-        super().__init__(model='cube', collider=None, texture='white_cube')
+        super().__init__(model='cube', collider='box', texture='white_cube')
         self.add_to_scene_entities = False
         for key, value in kwargs.items():
             setattr(self, key ,value)

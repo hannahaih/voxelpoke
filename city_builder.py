@@ -2,20 +2,14 @@ from ursina import *
 from collections import namedtuple
 import json
 
-# import pyximport; pyximport.install(language_level=3) # easy way to import .pyx files, auto-compiles
-# from voxels_to_mesh import voxels_to_mesh
-# from grid_to_cubes import grid_to_cubes
 Size = namedtuple('Size', ['x','y','z'])
 
-# window.vsync = False
 chunk_size = Size(32, 32, 32)
 cube = Entity(model='cube', enabled=False).model
 cube.vertices = [Vec3(*e)+Vec3(.5,.5,.5) for e in cube.vertices]
 
 cube_model = load_model('cube', application.internal_models_compressed_folder)
 brush = Entity(model='wireframe_cube', color=color.green, always_on_top=True, origin=(-.5,-.5,-.5))
-# brush.model.mode = 'line'
-# brush.model.generate()
 
 cube_verts = [
     (0,0,0), (1,0,0), (1,0,1), (0,0,1),
@@ -47,21 +41,29 @@ class Chunk(Entity):
         super().__init__(**kwargs)
         self.size = size
         self.grid = [[[0 for z in range(size.x)]for y in range(size.y)] for x in range(size.z)]
-        self.model = Mesh(vertices=[], uvs=[])
+        self.model = Mesh(vertices=[], uvs=[], render_points_in_3d=True, thickness=1)
         self.texture = 'white_cube'
-        # self.colliders = []
-        self.render()
-        # self.edges = Entity(parent=self, model=copy(brush.model), color=color.red, scale=size)
-
+        self.temp = Entity(parent=self, model=Mesh(), texture=self.texture, collision=False)
+        self.temp.grid = [[[0 for z in range(size.x)]for y in range(size.y)] for x in range(size.z)]
 
         for key, value in kwargs.items():
             setattr(self, key ,value)
 
     def render(self):
-        t = time.perf_counter()
+        # t = time.perf_counter()
         self.model.vertices, self.model.uvs = voxels_to_mesh(self.grid) # .035, .01
-        print(time.perf_counter() - t)
+        # print(time.perf_counter() - t)
         self.model.generate()
+
+
+    def input(self, key):
+        if key == 'f2':
+            self.render_mode = 'default'
+            self.render()
+        if key == 'f3':
+            self.render_mode = 'point'
+            self.render()
+
 
 
 def voxels_to_mesh(voxels):
@@ -106,6 +108,9 @@ def voxels_to_mesh(voxels):
     return vertices, uvs
 
 
+brush.scale = 1
+brush_shape = [[[1 for z in range(int(brush.scale.x))]for y in range(int(brush.scale.y))] for x in range(int(brush.scale.z))]
+
 class Player(Entity):
     def __init__(self, **kwargs):
         super().__init__(model='quad', origin_y=-.5)
@@ -116,7 +121,7 @@ class Player(Entity):
         self.controller_rotation_speed = 80
         self.zoom_speed = 10
 
-        self.camera_pivot = Entity(parent=self, y=.5)
+        self.camera_pivot = Entity(parent=self, y=.5, rotation_x=20)
 
         camera.parent = self.camera_pivot
         camera.position = (0,0,-8)
@@ -152,12 +157,65 @@ class Player(Entity):
 
         self.position += self.direction * self.speed * time.dt
         self.y += (held_keys['e']+held_keys['gamepad right trigger'] - held_keys['q']-held_keys['gamepad left trigger']) * self.vertical_speed * time.dt
-
         camera.z += held_keys['gamepad right stick y'] * time.dt * self.zoom_speed
-        # camera.z = clamp(camera.z, -1, -30)
+
+        # block placement
+        brush.position = [floor(e) for e in player.position]
+
+        if mouse.left or held_keys['space'] or mouse.right or held_keys['gamepad a']:
+            # for chunk in chunks:
+            x, y, z = [int(e) for e in player.get_position(relative_to=current_chunk)]
+            org_grid = deepcopy(current_chunk.grid)
+
+
+            if x >= 0 and x < chunk_size.x and y >= 0 and y < chunk_size.y and z >= 0 and z < chunk_size.z:
+                if mouse.left or held_keys['space'] or held_keys['gamepad a']:
+                    if current_chunk.grid[x][y][z]:
+                        return
+
+                    for brush_x in range(len(brush_shape)):
+                        for brush_y in range(len(brush_shape[0])):
+                            for brush_z in range(len(brush_shape[0][0])):
+                                if brush_shape[brush_x][brush_y][brush_z]:
+                                    if is_out_of_bounds(x+brush_x, y+brush_y, z+brush_z):
+                                        continue
+                                    current_chunk.temp.grid[x+brush_x][y+brush_y][z+brush_z] = 1
+
+                    t = time.perf_counter()
+                    current_chunk.temp.model.vertices, current_chunk.temp.model.uvs = voxels_to_mesh(current_chunk.temp.grid) # .035, .01
+                    print(time.perf_counter() - t)
+                    current_chunk.temp.model.generate()
+
+
+                elif mouse.right or held_keys['gamepad x']:
+                    for brush_x in range(len(brush_shape)):
+                        for brush_y in range(len(brush_shape[0])):
+                            for brush_z in range(len(brush_shape[0][0])):
+                                if brush_shape[brush_x][brush_y][brush_z]:
+                                    if is_out_of_bounds(x+brush_x, y+brush_y, z+brush_z):
+                                        continue
+                                    current_chunk.grid[x+brush_x][y+brush_y][z+brush_z] = 0
+
+                    if not current_chunk.grid == org_grid:
+                        t = time.perf_counter()
+                        current_chunk.render()
+                        # print(time.perf_counter() - t, 1/60)
 
 
     def input(self, key):
+        if key == 'left mouse up' or key == 'gamepad a up': # apply the blocks from the temp grid
+            for x in range(current_chunk.size.x):
+                for y in range(current_chunk.size.y):
+                    for z in range(current_chunk.size.z):
+                        if current_chunk.temp.grid[x][y][z]:
+                            current_chunk.grid[x][y][z] = 1
+
+            current_chunk.render()
+            current_chunk.temp.grid = [[[0 for z in range(current_chunk.size.x)]for y in range(current_chunk.size.y)] for x in range(current_chunk.size.z)]
+            current_chunk.temp.model.clear()
+            current_chunk.temp.model.generate()
+
+
         if key == 'scroll down':
             camera.z -= 1
         if key == 'scroll up':
@@ -177,87 +235,51 @@ class Player(Entity):
             brush.scale = Vec3(max(brush.scale.x, 1), max(brush.scale.y, 1), max(brush.scale.z, 1))
             brush_shape = [[[1 for z in range(int(brush.scale.x))]for y in range(int(brush.scale.y))] for x in range(int(brush.scale.z))]
 
-        # if held_keys['control'] and key == 'p':
-        #     camera.orthographic = not camera.orthographic
+
+    def on_enable(self):
+        mouse.locked = True
+        brush.enabled = True
+
+    def on_disable(self):
+        mouse.locked = False
+        brush.enabled = False
 
 
+window.vsync = False
 app = Ursina()
+
 import noise
 from noise import *
 from ursina.shaders import lit_with_shadows_shader
-# chunk.shader = lit_with_shadows_shader
 
 num_chunks = 1
-chunks = [[Chunk(position=(x*chunk_size.x, 0, z*chunk_size.z), shader=lit_with_shadows_shader) for z in range(num_chunks)] for x in range(num_chunks)]
-# chunks = []
-for chunk_x in range(num_chunks):
-    for chunk_z in range(num_chunks):
-        chunk = chunks[chunk_x][chunk_z]
+# num_chunks = 8
+# chunks = [[Chunk(position=(x*chunk_size.x, 0, z*chunk_size.z), shader=lit_with_shadows_shader) for z in range(num_chunks)] for x in range(num_chunks)]
+# current_chunk = chunks[0][0]
+current_chunk = Chunk(shader=lit_with_shadows_shader)
 
-        # # loop through each chunk
-        # for z in range(chunk_size.z):
-        #     for x in range(chunk_size.x):
-        #         noise = pnoise2(
-        #             (x / chunk_size.x) + chunk_x,
-        #             (z / chunk_size.z) + chunk_z,
-        #             # x + (chunk_x*chunk_size) / chunk_size,
-        #             # z + (chunk_z*chunk_size) / chunk_size,
-        #             octaves=3, persistence=0.5, lacunarity=2.0, repeatx=1024, repeaty=1024, base=0)
-        #         noise = int((noise+.5)*chunk_size.y)
-        #         for y in range(noise):
-        #             chunk.grid[x][y][z] = 1
+for x in range(chunk_size.x):
+    for z in range(chunk_size.z):
+        for y in range(1):
+            current_chunk.grid[x][y][z] = 1
 
-        for x in range(chunk_size.x):
-            for z in range(chunk_size.z):
-                for y in range(1):
-                    chunks[chunk_x][chunk_z].grid[x][y][z] = 1
+for z in range(chunk_size.z):
+    for x in range(chunk_size.x):
+        noise = pnoise2(x/chunk_size.x, z/chunk_size.z, octaves=3, persistence=0.5, lacunarity=2.0, repeatx=1024, repeaty=1024, base=0)
+        noise = int((noise+.5)*chunk_size.y)
+        for y in range(noise):
+            current_chunk.grid[x][y][z] = 1
 
-        chunk.render()
+current_chunk.render()
 
-
-brush.scale = 1
-brush_shape = [[[1 for z in range(int(brush.scale.x))]for y in range(int(brush.scale.y))] for x in range(int(brush.scale.z))]
-
-
-
-def update():
-    brush.position = [floor(e) for e in player.position]
-    #
-    if mouse.left or held_keys['space'] or mouse.right or held_keys['gamepad a']:
-        # for chunk in chunks:
-        x, y, z = [int(e) for e in player.get_position(relative_to=chunk)]
-        # print(x,y,z)
-        org_grid = deepcopy(chunk.grid)
-
-
-        if x >= 0 and x < chunk_size.x and y >= 0 and y < chunk_size.y and z >= 0 and z < chunk_size.z:
-            if mouse.left or held_keys['space'] or held_keys['gamepad a']:
-                # if not chunk.grid[x][y][z]:
-                for brush_x in range(len(brush_shape)):
-                    for brush_y in range(len(brush_shape[0])):
-                        for brush_z in range(len(brush_shape[0][0])):
-                            if brush_shape[brush_x][brush_y][brush_z]:
-                                if x+brush_x < chunk_size.x and y+brush_y < chunk_size.y and z+brush_z < chunk_size.z:
-                                    chunk.grid[x+brush_x][y+brush_y][z+brush_z] = 1
-
-            elif mouse.right or held_keys['gamepad x']:
-                for brush_x in range(len(brush_shape)):
-                    for brush_y in range(len(brush_shape[0])):
-                        for brush_z in range(len(brush_shape[0][0])):
-                            if brush_shape[brush_x][brush_y][brush_z]:
-
-                                chunk.grid[x+brush_x][y+brush_y][z+brush_z] = 0
-            if not chunk.grid == org_grid:
-                t = time.perf_counter()
-                chunk.render()
-                # print(time.perf_counter() - t, 1/60)
-
+def is_out_of_bounds(x, y, z):
+    return x < 0 or x >= current_chunk.size.x or y < 0 or y >= current_chunk.size.y or z < 0 or z >= current_chunk.size.z
 
 
 from ursina.prefabs.file_browser import FileBrowser
 from ursina.prefabs.file_browser_save import FileBrowserSave
 file_browser =      FileBrowser(start_path=Path('.'), file_types=('.json'), enabled=False, ignore_paused=True)
-file_browser_save = FileBrowser(file_types=('.json'), enabled=False, ignore_paused=True)
+file_browser_save = FileBrowserSave(file_types=('.json'), enabled=False, ignore_paused=True)
 current_file = None
 
 def on_submit(value):
@@ -266,12 +288,8 @@ def on_submit(value):
         save()
 
 file_browser_save.on_submit = on_submit
-file_browser_save.on_enable = Sequence(Func(file_browser_save.on_enable), Func(setattr, mouse, 'locked', False))
-# def test():
-#     application.paused = True
-#     mouse.locked = True
+file_browser_save.on_enable = Func(setattr, mouse, 'locked', False)
 
-# file_browser_save.on_enable = test
 
 def save_current_file():
     if not current_file:
@@ -279,21 +297,22 @@ def save_current_file():
         return
 
     with open(current_file, 'w') as file:
-        json.dump(chunk.grid, file)
+        json.dump(current_chunk.grid, file)
 
 
 def save_as(path):
     with open(path, 'w') as file:
-        json.dump(chunk.grid, file)
+        json.dump(current_chunk.grid, file)
 
 
 def load():
     with open('test.json', 'r') as file:
-        chunk.grid = json.load(file)
-        chunk.render()
+        current_chunk.grid = json.load(file)
+        current_chunk.render()
 
-
+current_file = None
 def input(key):
+    global current_file
     if held_keys['control'] and key == 's':
         if current_file:
             save_current_file()
@@ -301,21 +320,90 @@ def input(key):
             file_browser_save.enabled = True
 
     if held_keys['control'] and key == 'l':
+        current_file = Path('test.json')
         load()
 
 
 
 # 125 641 blocks
-from ursina.shaders import unlit_shader
 player = Player(position=Vec3(num_chunks/2*chunk_size.x,0,num_chunks/2*chunk_size.z), model=None)
-# player.graphics = Entity(parent=player, model='quad', origin_y=-.5, shader=unlit_shader, texture='opossum', scale=(1,2))
-# brush.model = None
+from ursina.shaders import unlit_shader
+
+class MouseControls(Entity):
+    def __init__(self, **kwargs):
+        self.editor_camera = EditorCamera(parent=self, enabled=False, position=Vec3(num_chunks/2*chunk_size.x,0,num_chunks/2*chunk_size.z), rotation_x=45, zoom_speed=2)
+        super().__init__(position=Vec3(chunk_size.x/2, 0, chunk_size.z/2), **kwargs)
+        self.cursor = Entity(parent=self, model='quad', color=color.lime, unlit=True)
+
+
+    def update(self):
+        if not mouse.hovered_entity == current_chunk or not mouse.world_point:
+            self.cursor.enabled = False
+            return
+        else:
+            self.cursor.enabled = True
+            self.cursor.world_position = Vec3(*[int(e) for e in mouse.world_point-(mouse.normal/2)]) + Vec3(.5,.5,.5) + (mouse.normal*.501)
+            self.cursor.look_at(self.cursor.position + mouse.world_normal, axis='back')
+
+    def input(self, key):
+        if mouse.hovered_entity == current_chunk and mouse.world_point:
+            if key == 'left mouse down':
+                self.build(1, dig=held_keys['alt'])
+
+            if key in '123456789':
+                self.build(int(key), dig=held_keys['alt'], stop_on_hit=False)
+
+
+    def build(self, amount=1, dig=False, stop_on_hit=False):
+        start_pos = mouse.point-(mouse.normal/2)
+
+        for i in range(amount):
+            x, y, z = [int(e) for e in start_pos + (mouse.normal * (i+1-int(dig)) * (1,-1)[int(dig)])]
+
+            if is_out_of_bounds(x, y, z): # make sure it's inside the chunk
+                break
+
+            if stop_on_hit and current_chunk.grid[x][y][z] == int(not dig):
+                break
+
+            current_chunk.grid[x][y][z] = int(not dig)
+
+        current_chunk.render()
+        current_chunk.collider = 'mesh'
+
+
+    def on_enable(self):
+        camera.z = -30
+        self.editor_camera.enabled = True
+        current_chunk.collider = 'mesh'
+        mouse.traverse_target = scene
+
+    def on_disable(self):
+        self.editor_camera.enabled = False
+        mouse.traverse_target = None
+
+
+mouse_controls = MouseControls()
+
+
+state_handler = Animator({
+    'mouse_controls' : mouse_controls,
+    'controller' : player,
+})
+class PlayerToggler(Entity):
+    def input(self, key):
+        if key == 'tab':
+            if state_handler.state == 'controller':
+                state_handler.state = 'mouse_controls'
+            else:
+                state_handler.state = 'controller'
+
+PlayerToggler()
+
 
 sky = Sky(color=color.hex('#b8523b'))
 Entity(parent=render, model='plane', scale=9999, color='#b8523b')
-# ground = Entity(model='plane', origin=(-.5,0,-.5), scale=16, texture='grass', texture_scale=(16,16))
 
 DirectionalLight(rotation_x=30)
 
-scene.fog_color = sky.color
 app.run()
