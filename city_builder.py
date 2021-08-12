@@ -26,7 +26,7 @@ cube_verts = [
 0-------1
 '''
 
-cube_side_uvs = ((0,0), (1,0), (0,1), (0,1), (1,0), (1,1))
+cube_side_uvs = tuple(e/8 for e in (Vec2(0,0), Vec2(1,0), Vec2(0,1), Vec2(0,1), Vec2(1,0), Vec2(1,1)))
 cube_sides = (
     [cube_verts[i] for i in (1,2,5, 5,2,6)], # right
     [cube_verts[i] for i in (3,0,7, 7,0,4)], # left
@@ -35,6 +35,7 @@ cube_sides = (
     [cube_verts[i] for i in (2,3,6, 6,3,7)], # forward
     [cube_verts[i] for i in (0,1,4, 4,1,5)]  # back
 )
+tileset_index = 1
 
 class Chunk(Entity):
     def __init__(self, size=chunk_size, **kwargs):
@@ -42,7 +43,7 @@ class Chunk(Entity):
         self.size = size
         self.grid = [[[0 for z in range(size.x)]for y in range(size.y)] for x in range(size.z)]
         self.model = Mesh(vertices=[], uvs=[], render_points_in_3d=True, thickness=1)
-        self.texture = 'white_cube'
+        self.texture = 'tileset'
         self.temp = Entity(parent=self, model=Mesh(), texture=self.texture, collision=False)
         self.temp.grid = [[[0 for z in range(size.x)]for y in range(size.y)] for x in range(size.z)]
 
@@ -50,9 +51,9 @@ class Chunk(Entity):
             setattr(self, key ,value)
 
     def render(self):
-        # t = time.perf_counter()
+        t = time.perf_counter()
         self.model.vertices, self.model.uvs = voxels_to_mesh(self.grid) # .035, .01
-        # print(time.perf_counter() - t)
+        print(time.perf_counter() - t)
         self.model.generate()
 
 
@@ -64,6 +65,13 @@ class Chunk(Entity):
             self.render_mode = 'point'
             self.render()
 
+        global tileset_index
+        if key == 'left arrow' and tileset_index > 1:
+            tileset_index -= 1
+            print(tileset_index)
+        if key == 'right arrow' and tileset_index < 8:
+            tileset_index += 1
+            print(tileset_index)
 
 
 def voxels_to_mesh(voxels):
@@ -96,6 +104,7 @@ def voxels_to_mesh(voxels):
                     b = voxels[x][y][z-1]
 
                 neighbors = (r, l, u, d, f, b)
+                neightbors = (min(e, 1) for e in neighbors)
 
                 if neighbors == (1,1,1,1,1,1):
                     continue
@@ -103,7 +112,13 @@ def voxels_to_mesh(voxels):
                 for i, e in enumerate(neighbors):
                     if not e:
                         vertices.extend([(e[0]+x, e[1]+y, e[2]+z) for e in cube_sides[i]])
-                        uvs.extend(cube_side_uvs)
+
+                        y_offset = 0
+                        y_offset += int(i==2) * 2       # top
+                        y_offset += int(i not in (2,3)) * int(not u)    # sides without block above
+
+                        # uvs.extend([e + Vec2((voxels[x][y][z]-1) / 8, y_offset/8) for e in cube_side_uvs])
+                        uvs.extend([(e[0] + (voxels[x][y][z]-1)/8, e[1] + y_offset/8) for e in cube_side_uvs])
 
     return vertices, uvs
 
@@ -179,7 +194,7 @@ class Player(Entity):
                                 if brush_shape[brush_x][brush_y][brush_z]:
                                     if is_out_of_bounds(x+brush_x, y+brush_y, z+brush_z):
                                         continue
-                                    current_chunk.temp.grid[x+brush_x][y+brush_y][z+brush_z] = 1
+                                    current_chunk.temp.grid[x+brush_x][y+brush_y][z+brush_z] = tileset_index
 
                     t = time.perf_counter()
                     current_chunk.temp.model.vertices, current_chunk.temp.model.uvs = voxels_to_mesh(current_chunk.temp.grid) # .035, .01
@@ -208,7 +223,7 @@ class Player(Entity):
                 for y in range(current_chunk.size.y):
                     for z in range(current_chunk.size.z):
                         if current_chunk.temp.grid[x][y][z]:
-                            current_chunk.grid[x][y][z] = 1
+                            current_chunk.grid[x][y][z] = tileset_index
 
             current_chunk.render()
             current_chunk.temp.grid = [[[0 for z in range(current_chunk.size.x)]for y in range(current_chunk.size.y)] for x in range(current_chunk.size.z)]
@@ -261,14 +276,14 @@ current_chunk = Chunk(shader=lit_with_shadows_shader)
 for x in range(chunk_size.x):
     for z in range(chunk_size.z):
         for y in range(1):
-            current_chunk.grid[x][y][z] = 1
+            current_chunk.grid[x][y][z] = tileset_index
 
 for z in range(chunk_size.z):
     for x in range(chunk_size.x):
         noise = pnoise2(x/chunk_size.x, z/chunk_size.z, octaves=3, persistence=0.5, lacunarity=2.0, repeatx=1024, repeaty=1024, base=0)
         noise = int((noise+.5)*chunk_size.y)
         for y in range(noise):
-            current_chunk.grid[x][y][z] = 1
+            current_chunk.grid[x][y][z] = tileset_index
 
 current_chunk.render()
 
@@ -366,7 +381,7 @@ class MouseControls(Entity):
             if stop_on_hit and current_chunk.grid[x][y][z] == int(not dig):
                 break
 
-            current_chunk.grid[x][y][z] = int(not dig)
+            current_chunk.grid[x][y][z] = int(not dig) * tileset_index
 
         current_chunk.render()
         current_chunk.collider = 'mesh'
@@ -401,7 +416,7 @@ class PlayerToggler(Entity):
 PlayerToggler()
 
 
-sky = Sky(color=color.hex('#b8523b'))
+sky = Sky()
 Entity(parent=render, model='plane', scale=9999, color='#b8523b')
 
 DirectionalLight(rotation_x=30)
