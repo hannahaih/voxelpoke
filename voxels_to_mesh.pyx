@@ -1,7 +1,7 @@
 from ursina import *
 import cython
 # from cpython cimport array
-# from libc.stdlib cimport malloc, free
+from libc.stdlib cimport malloc, free
 
 cube_verts = [
     (0,0,0), (1,0,0), (1,0,1), (0,0,1),
@@ -42,6 +42,8 @@ def voxels_to_mesh(voxels):
     width = len(voxels)
     height = len(voxels[0])
     depth = len(voxels[0][0])
+    cdef bint *neighbors = <bint *> malloc(6 * sizeof(bint))
+
     for x in range(width):
         for y in range(height):
             for z in range(depth):
@@ -51,7 +53,7 @@ def voxels_to_mesh(voxels):
 
                 r, l, u, d, f, b = 0, 0, 0, 0, 0, 0     # right, left, up, down, forward, back
 
-                # make sure we only get neightbors within bounds, otherwise stay as 0
+                # make sure we only get neighbors within bounds, otherwise stay as 0
                 if x < width-1:
                     r = voxels[x+1][y][z]
                 if x > 0:
@@ -65,15 +67,29 @@ def voxels_to_mesh(voxels):
                 if z > 0:
                     b = voxels[x][y][z-1]
 
-                neighbors = (r, l, u, d, f, b)
+                # neighbors = (r, l, u, d, f, b)
+                neighbors[0] = r
+                neighbors[1] = l
+                neighbors[2] = u
+                neighbors[3] = d
+                neighbors[4] = f
+                neighbors[5] = b
 
-                if neighbors == (1,1,1,1,1,1):
+                if neighbors[0] > 0 and neighbors[1] > 0 and neighbors[2] > 0 and neighbors[3] > 0 and neighbors[4] > 0 and neighbors[5] > 0:
                     continue
 
-                for i, e in enumerate(neighbors):
+
+                for i in range(6):
+                    e = neighbors[i]
                     if not e:
                         vertices.extend([(e[0]+x, e[1]+y, e[2]+z) for e in cube_sides[i]])
-                        # ([(e[0]+x, e[1]+y, e[2]+z) for e in cube_sides[i]])
-                        uvs.extend(cube_side_uvs)
 
+                        y_offset = 0
+                        y_offset += int(i==2) * 2       # top
+                        y_offset += int(i not in (2,3)) * int(not u)    # sides without block above
+
+                        # uvs.extend([e + Vec2((voxels[x][y][z]-1) / 8, y_offset/8) for e in cube_side_uvs])
+                        uvs.extend([((e[0] + (voxels[x][y][z]-1))/8, (e[1] + y_offset)/8) for e in cube_side_uvs])
+
+    free(neighbors)
     return vertices, uvs

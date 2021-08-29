@@ -2,6 +2,11 @@ from ursina import *
 from collections import namedtuple
 import json
 
+import pyximport
+pyximport.install()
+pyximport.install(language_level=3) # easy way to import .pyx files, auto-compiles
+from voxels_to_mesh import voxels_to_mesh # python: .07, cython no changes: .06, cython with types: .02, cython flat array: .016
+
 Size = namedtuple('Size', ['x','y','z'])
 
 chunk_size = Size(32, 32, 32)
@@ -41,6 +46,7 @@ class Chunk(Entity):
     def __init__(self, size=chunk_size, **kwargs):
         super().__init__(**kwargs)
         self.size = size
+        # self.grid = [[[0 for z in range(size.x)]for y in range(size.y)] for x in range(size.z)]
         self.grid = [[[0 for z in range(size.x)]for y in range(size.y)] for x in range(size.z)]
         self.model = Mesh(vertices=[], uvs=[], render_points_in_3d=True, thickness=1)
         self.texture = 'tileset'
@@ -74,53 +80,51 @@ class Chunk(Entity):
             print(tileset_index)
 
 
-def voxels_to_mesh(voxels):
-    vertices = []
-    uvs = []
-    width = len(voxels)
-    height = len(voxels[0])
-    depth = len(voxels[0][0])
-    for x in range(width):
-        for y in range(height):
-            for z in range(depth):
-
-                if voxels[x][y][z] == 0:
-                    continue
-
-                r, l, u, d, f, b = 0, 0, 0, 0, 0, 0     # right, left, up, down, forward, back
-
-                # make sure we only get neightbors within bounds, otherwise stay as 0
-                if x < width-1:
-                    r = voxels[x+1][y][z]
-                if x > 0:
-                    l = voxels[x-1][y][z]
-                if y < height-1:
-                    u = voxels[x][y+1][z]
-                if y > 0:
-                    d = voxels[x][y-1][z]
-                if z < depth-1:
-                    f = voxels[x][y][z+1]
-                if z > 0:
-                    b = voxels[x][y][z-1]
-
-                neighbors = (r, l, u, d, f, b)
-                neightbors = (min(e, 1) for e in neighbors)
-
-                if neighbors == (1,1,1,1,1,1):
-                    continue
-
-                for i, e in enumerate(neighbors):
-                    if not e:
-                        vertices.extend([(e[0]+x, e[1]+y, e[2]+z) for e in cube_sides[i]])
-
-                        y_offset = 0
-                        y_offset += int(i==2) * 2       # top
-                        y_offset += int(i not in (2,3)) * int(not u)    # sides without block above
-
-                        # uvs.extend([e + Vec2((voxels[x][y][z]-1) / 8, y_offset/8) for e in cube_side_uvs])
-                        uvs.extend([(e[0] + (voxels[x][y][z]-1)/8, e[1] + y_offset/8) for e in cube_side_uvs])
-
-    return vertices, uvs
+# def voxels_to_mesh(voxels):
+#     vertices = []
+#     uvs = []
+#     width = len(voxels)
+#     height = len(voxels[0])
+#     depth = len(voxels[0][0])
+#     for x in range(width):
+#         for y in range(height):
+#             for z in range(depth):
+#
+#                 if voxels[x][y][z] == 0:
+#                     continue
+#
+#                 r, l, u, d, f, b = 0, 0, 0, 0, 0, 0     # right, left, up, down, forward, back
+#
+#                 # make sure we only get neighbors within bounds, otherwise stay as 0
+#                 if x < width-1:
+#                     r = voxels[x+1][y][z]
+#                 if x > 0:
+#                     l = voxels[x-1][y][z]
+#                 if y < height-1:
+#                     u = voxels[x][y+1][z]
+#                 if y > 0:
+#                     d = voxels[x][y-1][z]
+#                 if z < depth-1:
+#                     f = voxels[x][y][z+1]
+#                 if z > 0:
+#                     b = voxels[x][y][z-1]
+#
+#                 neighbors = (r, l, u, d, f, b)
+#
+#                 if neighbors[0] > 0 and neighbors[1] > 0 and neighbors[2] > 0 and neighbors[3] > 0 and neighbors[4] > 0 and neighbors[5] > 0:
+#                     continue
+#
+#                 for i, e in enumerate(neighbors):
+#                     if not e:
+#                         vertices.extend([(e[0]+x, e[1]+y, e[2]+z) for e in cube_sides[i]])
+#
+#                         y_offset = 0
+#                         y_offset += int(i==2) * 2       # top
+#                         y_offset += int(i not in (2,3)) * int(not u)    # sides without block above
+#
+#                         uvs.extend([(e[0] + (voxels[x][y][z]-1)/8, e[1] + y_offset/8) for e in cube_side_uvs])
+#
+#     return vertices, uvs
 
 
 brush.scale = 1
@@ -197,7 +201,7 @@ class Player(Entity):
                                     current_chunk.temp.grid[x+brush_x][y+brush_y][z+brush_z] = tileset_index
 
                     t = time.perf_counter()
-                    current_chunk.temp.model.vertices, current_chunk.temp.model.uvs = voxels_to_mesh(current_chunk.temp.grid) # .035, .01
+                    current_chunk.temp.model.vertices, current_chunk.temp.model.uvs = voxels_to_mesh(current_chunk.temp.grid) # .035, .01, .07
                     print(time.perf_counter() - t)
                     current_chunk.temp.model.generate()
 
