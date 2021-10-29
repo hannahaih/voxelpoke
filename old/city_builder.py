@@ -14,7 +14,7 @@ def sum(l):
 app = Ursina()
 
 grid = Entity(model='irregular_grid')
-grid_mesh = grid.model
+grid_mesh = deepcopy(grid.model)
 grid_mesh.vertices = [Vec3(*e) for e in grid_mesh.vertices]
 buildings = Entity(model=Mesh(vertices=list(), triangles=list()))
 building_mesh = buildings.model

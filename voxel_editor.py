@@ -10,7 +10,7 @@ from voxels_to_mesh import voxels_to_mesh # python: .07, cython no changes: .06,
 Size = namedtuple('Size', ['x','y','z'])
 
 chunk_size = Size(32, 32, 32)
-cube = Entity(model='cube', enabled=False).model
+cube = Cube()
 cube.vertices = [Vec3(*e)+Vec3(.5,.5,.5) for e in cube.vertices]
 
 cube_model = load_model('cube', application.internal_models_compressed_folder)
@@ -143,7 +143,7 @@ class Player(Entity):
         self.camera_pivot = Entity(parent=self, y=.5, rotation_x=20)
 
         camera.parent = self.camera_pivot
-        camera.position = (0,0,-8)
+        camera.position = (0,0,-30)
         camera.rotation = (0,0,0)
         camera.fov = 90
         mouse.locked = True
@@ -342,11 +342,13 @@ def input(key):
         current_file = Path('test.json')
         load()
 
+    if key == 'space':
+        print(camera.z)
 
 
 # 125 641 blocks
 player = Player(position=Vec3(num_chunks/2*chunk_size.x,0,num_chunks/2*chunk_size.z), model=None)
-from ursina.shaders import unlit_shader
+# from ursina.shaders import unlit_shader
 
 class MouseControls(Entity):
     def __init__(self, **kwargs):
@@ -393,6 +395,7 @@ class MouseControls(Entity):
 
     def on_enable(self):
         camera.z = -30
+        print('wwwwwwwwefefefefefwwww')
         self.editor_camera.enabled = True
         current_chunk.collider = 'mesh'
         mouse.traverse_target = scene
@@ -423,6 +426,7 @@ PlayerToggler()
 sky = Sky()
 Entity(parent=render, model='plane', scale=9999, color='#b8523b')
 
-DirectionalLight(rotation_x=30)
+bounds = Entity(model='wireframe_cube', scale=32.01, origin=(-.5,-.5,-.5), color=color.color(0,0,1,.2), unlit=True, visible=False)
+sun = DirectionalLight(rotation_x=30)
 
 app.run()
